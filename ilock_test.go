@@ -11,26 +11,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var workloads = []struct {
-	name        string
-	concurrency int
-	writeRatio  float32
-}{
-	{"Serial", 1, 0.10},
-	{"Serial, heavy writes", 1, 0.50},
-	{"Low concurrency", 2, 0.10},
-	{"Medium concurrency", 10, 0.10},
-	{"High concurrency", 20, 0.10},
-	{"High concurrency, heavy writes", 20, 0.50},
-}
-
 const serialConcurrency = 1
 const lowConcurrency = 2
 const mediumConcurrency = 10
 const highConcurrency = 20
 
-const writeFrac = 0.1
-const heavyWriteFrac = 0.5
+const noWritePerc = 0
+const writePerc = 1
+const heavyWritePerc = 10
 
 /* Ensure the values are nondecreasing.  If there is a non-decreasing
 * value, because each writer should take some lock at some index and
@@ -42,31 +30,42 @@ func testNonDecreasing(b *testing.B, values []uint32) {
 	}
 }
 
+func BenchmarkSerialNoWrites(b *testing.B) {
+	ret := benchmarkLocking(b, serialConcurrency, noWritePerc)
+	testNonDecreasing(b, ret)
+}
+
 func BenchmarkSerial(b *testing.B) {
-	ret := benchmarkLocking(b, serialConcurrency, int(writeFrac*100))
+	ret := benchmarkLocking(b, serialConcurrency, writePerc)
 	testNonDecreasing(b, ret)
 }
 
 func BenchmarkSerialHeavyLocking(b *testing.B) {
-	ret := benchmarkLocking(b, serialConcurrency, int(heavyWriteFrac*100))
+	ret := benchmarkLocking(b, serialConcurrency, heavyWritePerc)
 	testNonDecreasing(b, ret)
 }
 
 func BenchmarkLowConcurrency(b *testing.B) {
-	ret := benchmarkLocking(b, lowConcurrency, int(writeFrac*100))
+	ret := benchmarkLocking(b, lowConcurrency, writePerc)
 	testNonDecreasing(b, ret)
 }
 
 func BenchmarkMediumConcurrency(b *testing.B) {
-	ret := benchmarkLocking(b, mediumConcurrency, int(writeFrac*100))
+	ret := benchmarkLocking(b, mediumConcurrency, writePerc)
 	testNonDecreasing(b, ret)
 }
-func BenchmarkHighConcurrency(b *testing.B) {
-	benchmarkLocking(b, highConcurrency, int(writeFrac*100))
+
+func BenchmarkHighConcurrencyNoWrites(b *testing.B) {
+	ret := benchmarkLocking(b, highConcurrency, noWritePerc)
+	testNonDecreasing(b, ret)
 }
 
-func BenchmarkHighConcurrencyHeavyLocking(b *testing.B) {
-	benchmarkLocking(b, highConcurrency, int(heavyWriteFrac*100))
+func BenchmarkHighConcurrency(b *testing.B) {
+	benchmarkLocking(b, highConcurrency, writePerc)
+}
+
+func BenchmarkHighConcurrencyHeavyWrites(b *testing.B) {
+	benchmarkLocking(b, highConcurrency, heavyWritePerc)
 }
 
 /* This test simulates `concurrency` actors acting on a "branch"
@@ -126,8 +125,9 @@ func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 		<-barrier
 	}
 
+	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		rw := rand.Intn(100) < writePerc
+		rw := rand.Intn(100) <= writePerc
 		offset := rand.Intn(len(mutexes))
 
 		barrier <- true
@@ -137,6 +137,7 @@ func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 			go sHandler(offset)
 		}
 	}
+	b.StopTimer()
 
 	for {
 		select {

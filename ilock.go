@@ -105,7 +105,6 @@ package ilock
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -209,60 +208,36 @@ func New() *Mutex {
 // Returns whether this operation is compatible with the
 // previous lock state.
 func (m *Mutex) registerIS() bool {
-	for {
-		state := atomic.LoadUint64(&m.state)
-		newState := setIS(state, extractIS(state)+1)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			// We registered ourselves in the state word; are we
-			// compatable with the previous lock state?
-			return compatableWithIS(state)
-		}
-	}
+	state := m.state
+	m.state = setIS(state, extractIS(state)+1)
+	return compatableWithIS(state)
 }
 
 // Registers the calling thread as a holder in the IX state.
 // Returns whether this operation is compatible with the
 // previous lock state.
 func (m *Mutex) registerIX() bool {
-	for {
-		state := atomic.LoadUint64(&m.state)
-		newState := setIX(state, extractIX(state)+1)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			// We registered ourselves in the state word; are we
-			// compatable with the previous lock state?
-			return compatableWithIX(state)
-		}
-	}
+	state := m.state
+	m.state = setIX(state, extractIX(state)+1)
+	return compatableWithIX(state)
 }
 
 // Registers the calling thread as a holder in the S state.
 // Returns whether this operation is compatible with the
 // previous lock state.
 func (m *Mutex) registerS() bool {
-	for {
-		state := atomic.LoadUint64(&m.state)
-		newState := setS(state, extractS(state)+1)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			// We registered ourselves in the state word; are we
-			// compatable with the previous lock state?
-			return compatableWithS(state)
-		}
-	}
+	state := m.state
+	m.state = setS(state, extractS(state)+1)
+	return compatableWithS(state)
 }
 
 // Registers the calling thread as a holder in the X state.
 // Returns whether this operation is compatible with the
 // previous lock state.
 func (m *Mutex) registerX() bool {
-	for {
-		state := atomic.LoadUint64(&m.state)
-		newState := setX(state, extractX(state)+1)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			// We registered ourselves in the state word; are we
-			// compatable with the previous lock state?
-			return compatableWithX(state)
-		}
-	}
+	state := m.state
+	m.state = setX(state, extractX(state)+1)
+	return compatableWithX(state)
 }
 
 // ISLock takes the Mutex for shared read access. Blocks if the lock is
@@ -271,7 +246,7 @@ func (m *Mutex) registerX() bool {
 func (m *Mutex) ISLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
-	for !compatableWithIS(atomic.LoadUint64(&m.state)) {
+	for !compatableWithIS(m.state) {
 		//fmt.Printf("NBT: ISLock has to wait!\n")
 		m.c.Wait() // No! Wait;
 		//fmt.Printf("NBT: ISLock woke up!\n")
@@ -283,21 +258,15 @@ func (m *Mutex) ISLock() {
 // ISUnlock removes the single writer's IS state value and schedule all
 // blocked goroutines to run.
 func (m *Mutex) ISUnlock() {
-	var val uint64
-	// Atomically unset our IS state.
-	for {
-		state := atomic.LoadUint64(&m.state)
-		val = extractIS(state) - 1
-		newState := setIS(state, val)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			break
-		}
-	}
+	m.mtx.Lock()
+	val := extractIS(m.state) - 1
+	m.state = setIS(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
 	if val == 0 {
 		m.c.Broadcast()
 	}
+	m.mtx.Unlock()
 }
 
 // IXLock takes the Mutex for shared read access. Blocks if the lock is
@@ -306,7 +275,7 @@ func (m *Mutex) ISUnlock() {
 func (m *Mutex) IXLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
-	for !compatableWithIX(atomic.LoadUint64(&m.state)) {
+	for !compatableWithIX(m.state) {
 		//fmt.Printf("NBT: ISLock has to wait!\n")
 		m.c.Wait() // No! Wait;
 		//fmt.Printf("NBT: ISLock woke up!\n")
@@ -318,21 +287,15 @@ func (m *Mutex) IXLock() {
 // IXUnlock removes the single writer's IX state value and schedule all
 // blocked goroutines to run.
 func (m *Mutex) IXUnlock() {
-	// Atomically unset our IX state.
-	var val uint64
-	for {
-		state := atomic.LoadUint64(&m.state)
-		val = extractIX(state) - 1
-		newState := setIX(state, val)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			break
-		}
-	}
+	m.mtx.Lock()
+	val := extractIX(m.state) - 1
+	m.state = setIX(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
 	if val == 0 {
 		m.c.Broadcast()
 	}
+	m.mtx.Unlock()
 }
 
 // SLock takes the Mutex for shared read access. Blocks if the lock is
@@ -341,7 +304,7 @@ func (m *Mutex) IXUnlock() {
 func (m *Mutex) SLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
-	for !compatableWithS(atomic.LoadUint64(&m.state)) {
+	for !compatableWithS(m.state) {
 		//fmt.Printf("NBT: SLock has to wait!\n")
 		m.c.Wait() // No! Wait;
 		//fmt.Printf("NBT: SLock woke up!\n")
@@ -353,21 +316,15 @@ func (m *Mutex) SLock() {
 // SUnlock decrements the lock's S state value and schedules all
 // blocked goroutines to run.
 func (m *Mutex) SUnlock() {
-	var val uint64
-	// Atomically unset our S state.
-	for {
-		state := atomic.LoadUint64(&m.state)
-		val = extractS(state) - 1
-		newState := setS(state, val)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			break
-		}
-	}
+	m.mtx.Lock()
+	val := extractS(m.state) - 1
+	m.state = setS(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
 	if val == 0 {
 		m.c.Broadcast()
 	}
+	m.mtx.Unlock()
 }
 
 // XLock takes the Mutex for exclusive write access. Blocks if the lock is
@@ -376,7 +333,7 @@ func (m *Mutex) SUnlock() {
 func (m *Mutex) XLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
-	for !compatableWithX(atomic.LoadUint64(&m.state)) {
+	for !compatableWithX(m.state) {
 		//fmt.Printf("NBT: ISLock has to wait!\n")
 		m.c.Wait() // No! Wait;
 		//fmt.Printf("NBT: ISLock woke up!\n")
@@ -388,19 +345,13 @@ func (m *Mutex) XLock() {
 // XUnlock removes the single writer's X state value and schedule all
 // blocked goroutines to run.
 func (m *Mutex) XUnlock() {
-	var val uint64
-	// Atomically unset our X state.
-	for {
-		state := atomic.LoadUint64(&m.state)
-		val = extractX(state) - 1
-		newState := setX(state, val)
-		if atomic.CompareAndSwapUint64(&m.state, state, newState) {
-			break
-		}
-	}
+	m.mtx.Lock()
+	val := extractX(m.state) - 1
+	m.state = setX(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
 	if val == 0 {
 		m.c.Broadcast()
 	}
+	m.mtx.Unlock()
 }
