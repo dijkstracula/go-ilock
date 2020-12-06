@@ -24,34 +24,59 @@ var workloads = []struct {
 	{"High concurrency, heavy writes", 20, 0.50},
 }
 
-func TestWorkloads(t *testing.T) {
-	for _, w := range workloads {
-		t.Logf("Testing workload %v\n", w.name)
-		values := testLocking(t, w.concurrency, int(w.writeRatio*100))
-		testNonDecreasing(t, values)
-	}
-}
+const serialConcurrency = 1
+const lowConcurrency = 2
+const mediumConcurrency = 10
+const highConcurrency = 20
+
+const writeFrac = 0.1
+const heavyWriteFrac = 0.5
 
 /* Ensure the values are nondecreasing.  If there is a non-decreasing
 * value, because each writer should take some lock at some index and
 * increment all subsequent indices too, if there's a decreasing value
 * observed then we know we're not linearizing our write operations. */
-func testNonDecreasing(t *testing.T, values []uint32) {
+func testNonDecreasing(b *testing.B, values []uint32) {
 	for i := 1; i < len(values); i++ {
-		assert.LessOrEqual(t, values[i-1], values[i], "Nondecreasing value")
+		assert.LessOrEqual(b, values[i-1], values[i], "Nondecreasing value")
 	}
+}
+
+func BenchmarkSerial(b *testing.B) {
+	ret := benchmarkLocking(b, serialConcurrency, int(writeFrac*100))
+	testNonDecreasing(b, ret)
+}
+
+func BenchmarkSerialHeavyLocking(b *testing.B) {
+	ret := benchmarkLocking(b, serialConcurrency, int(heavyWriteFrac*100))
+	testNonDecreasing(b, ret)
+}
+
+func BenchmarkLowConcurrency(b *testing.B) {
+	ret := benchmarkLocking(b, lowConcurrency, int(writeFrac*100))
+	testNonDecreasing(b, ret)
+}
+
+func BenchmarkMediumConcurrency(b *testing.B) {
+	ret := benchmarkLocking(b, mediumConcurrency, int(writeFrac*100))
+	testNonDecreasing(b, ret)
+}
+func BenchmarkHighConcurrency(b *testing.B) {
+	benchmarkLocking(b, highConcurrency, int(writeFrac*100))
+}
+
+func BenchmarkHighConcurrencyHeavyLocking(b *testing.B) {
+	benchmarkLocking(b, highConcurrency, int(heavyWriteFrac*100))
 }
 
 /* This test simulates `concurrency` actors acting on a "branch"
  * of a tree of data.  mutexes[i] is responsible explicitly for
  * values[i] and all subsequent values, implicitly.
  */
-func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
+func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 	l := log.New(os.Stderr, "", 0)
 	l.SetOutput(ioutil.Discard)
 	barrier := make(chan bool, concurrency)
-	begin := time.Now()
-	end := begin.Add(5 * time.Second)
 
 	/* mutexes[i] encapsulates values[i..9] */
 	var mutexes [10]*Mutex
@@ -61,12 +86,11 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		mutexes[i] = New()
 	}
 
-	ixHandler := func(offset int, delay time.Duration) {
+	ixHandler := func(offset int) {
 		for i := 0; i <= offset; i++ {
 			mutexes[i].IXLock()
 			l.Printf("ixHandler -> %d %d\n", i, offset)
 		}
-		time.Sleep(delay)
 		for i := offset; i >= 0; i-- {
 			mutexes[i].IXUnlock()
 			l.Printf("ixHandler <- %d %d\n", i, offset)
@@ -74,12 +98,11 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		<-barrier
 	}
 
-	isHandler := func(offset int, delay time.Duration) {
+	isHandler := func(offset int) {
 		for i := 0; i <= offset; i++ {
 			mutexes[i].ISLock()
 			l.Printf("isHandler -> %d %d\n", i, offset)
 		}
-		time.Sleep(delay)
 		for i := offset; i >= 0; i-- {
 			mutexes[i].ISUnlock()
 			l.Printf("isHandler <- %d %d\n", i, offset)
@@ -87,7 +110,7 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		<-barrier
 	}
 
-	sHandler := func(offset int, delay time.Duration) {
+	sHandler := func(offset int) {
 		for i := 0; i < offset; i++ {
 			mutexes[i].ISLock()
 			l.Printf("sHandler -> IS %d %d\n", i, offset)
@@ -95,9 +118,6 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		mutexes[offset].SLock()
 		l.Printf("sHandler -> S %d\n", offset)
 
-		testNonDecreasing(t, values[:])
-
-		time.Sleep(delay)
 		mutexes[offset].SUnlock()
 		l.Printf("sHandler <- S %d\n", offset)
 
@@ -108,7 +128,7 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		<-barrier
 	}
 
-	xHandler := func(offset int, delay time.Duration) {
+	xHandler := func(offset int) {
 		for i := 0; i < offset; i++ {
 			mutexes[i].IXLock()
 			l.Printf("xHandler -> IX %d %d\n", i, offset)
@@ -116,12 +136,9 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		mutexes[offset].XLock()
 		l.Printf("xHandler -> X %d\n", offset)
 
-		testNonDecreasing(t, values[:])
-
 		for i := offset; i < len(values); i++ {
 			values[i]++
 		}
-		time.Sleep(delay)
 
 		mutexes[offset].XUnlock()
 		l.Printf("xHandler <- X %d\n", offset)
@@ -133,26 +150,23 @@ func testLocking(t *testing.T, concurrency int, writePerc int) []uint32 {
 		<-barrier
 	}
 
-	seed := time.Now().UTC().UnixNano()
-	rng := rand.New(rand.NewSource(seed))
-	for time.Now().Before(end) {
-		rw := rng.Intn(100) < writePerc
-		delay := time.Duration(1+rng.Intn(50)) * time.Millisecond
-		i := rng.Intn(len(mutexes))
+	for i := 0; i < b.N; i++ {
+		rw := rand.Intn(100) < writePerc
+		offset := rand.Intn(len(mutexes))
 
 		barrier <- true
 		if rw {
-			go xHandler(i, delay)
+			go xHandler(offset)
 		} else {
-			switch rng.Intn(3) {
+			switch rand.Intn(3) {
 			case 0:
-				go ixHandler(i, delay)
+				go ixHandler(offset)
 				break
 			case 1:
-				go isHandler(i, delay)
+				go isHandler(offset)
 				break
 			case 2:
-				go sHandler(i, delay)
+				go sHandler(offset)
 				break
 			}
 		}
