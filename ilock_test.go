@@ -79,35 +79,11 @@ func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 	barrier := make(chan bool, concurrency)
 
 	/* mutexes[i] encapsulates values[i..9] */
-	var mutexes [10]*Mutex
-	var values [10]uint32
+	var mutexes [20]*Mutex
+	var values [20]uint32
 
 	for i := 0; i < len(mutexes); i++ {
 		mutexes[i] = New()
-	}
-
-	ixHandler := func(offset int) {
-		for i := 0; i <= offset; i++ {
-			mutexes[i].IXLock()
-			l.Printf("ixHandler -> %d %d\n", i, offset)
-		}
-		for i := offset; i >= 0; i-- {
-			mutexes[i].IXUnlock()
-			l.Printf("ixHandler <- %d %d\n", i, offset)
-		}
-		<-barrier
-	}
-
-	isHandler := func(offset int) {
-		for i := 0; i <= offset; i++ {
-			mutexes[i].ISLock()
-			l.Printf("isHandler -> %d %d\n", i, offset)
-		}
-		for i := offset; i >= 0; i-- {
-			mutexes[i].ISUnlock()
-			l.Printf("isHandler <- %d %d\n", i, offset)
-		}
-		<-barrier
 	}
 
 	sHandler := func(offset int) {
@@ -158,17 +134,7 @@ func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 		if rw {
 			go xHandler(offset)
 		} else {
-			switch rand.Intn(3) {
-			case 0:
-				go ixHandler(offset)
-				break
-			case 1:
-				go isHandler(offset)
-				break
-			case 2:
-				go sHandler(offset)
-				break
-			}
+			go sHandler(offset)
 		}
 	}
 
