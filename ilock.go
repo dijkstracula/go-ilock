@@ -259,6 +259,11 @@ func (m *Mutex) ISLock() {
 // blocked goroutines to run.
 func (m *Mutex) ISUnlock() {
 	m.mtx.Lock()
+
+	if extractIS(m.state) == 0 {
+		panic("ISUnlock: unlock attempt, but not held!")
+	}
+
 	val := extractIS(m.state) - 1
 	m.state = setIS(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
@@ -288,6 +293,11 @@ func (m *Mutex) IXLock() {
 // blocked goroutines to run.
 func (m *Mutex) IXUnlock() {
 	m.mtx.Lock()
+
+	if extractIX(m.state) == 0 {
+		panic("IXUnlock: unlock attempt, but not held!")
+	}
+
 	val := extractIX(m.state) - 1
 	m.state = setIX(m.state, val)
 	// If the number of holders of this context has gone to zero, we should
