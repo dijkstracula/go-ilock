@@ -1,10 +1,10 @@
 package ilock
 
 import (
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,7 +74,7 @@ func BenchmarkHighConcurrencyHeavyWrites(b *testing.B) {
  */
 func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 	l := log.New(os.Stderr, "", 0)
-	l.SetOutput(ioutil.Discard)
+	//l.SetOutput(ioutil.Discard)
 	barrier := make(chan bool, concurrency)
 
 	/* mutexes[i] encapsulates values[i..9] */
@@ -88,17 +88,22 @@ func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 	sHandler := func(offset int) {
 		for i := 0; i < offset; i++ {
 			mutexes[i].ISLock()
-			l.Printf("sHandler -> IS %d %d\n", i, offset)
+			//	l.Printf("sHandler -> IS %d %d\n", i, offset)
 		}
 		mutexes[offset].SLock()
 		l.Printf("sHandler -> S %d\n", offset)
+
+		var garbage uint32
+		for i := offset; i < len(values); i++ {
+			garbage += values[i]
+		}
 
 		mutexes[offset].SUnlock()
 		l.Printf("sHandler <- S %d\n", offset)
 
 		for i := offset - 1; i >= 0; i-- {
 			mutexes[i].ISUnlock()
-			l.Printf("sHandler <- IS %d %d\n", i, offset)
+			//l.Printf("sHandler <- IS %d %d\n", i, offset)
 		}
 		<-barrier
 	}
@@ -307,4 +312,82 @@ func TestRegisterIX(t *testing.T) {
 	m = New()
 	assert.True(t, m.registerIX(), "Failure to register IX state from nascent Mutex")
 	assert.True(t, m.registerIX(), "Failure to allow simultaneous IX states")
+}
+
+type op int
+
+const (
+	Read  = 1
+	Write = 2
+)
+
+// This test ensures that if we have multiple readers and writers contending on an
+// intention lock, that we do not proceed with any of the writers until all the readers
+// have been processed.
+func TestDrainReads(t *testing.T) {
+	l := log.New(os.Stderr, "", 0)
+	l.SetOutput(os.Stderr)
+
+	begin := time.Now()
+	end := begin.Add(5 * time.Second)
+
+	readers := 5
+	writers := 5
+
+	for time.Now().Before(end) {
+		l.Printf("----")
+		ch := make(chan op, readers+writers+1)
+
+		// Grab the lock
+		mtx := New()
+		mtx.XLock()
+
+		var wg sync.WaitGroup
+		wg.Add(readers + writers)
+
+		// Fire off a set number of readers and writers.
+		for i := 0; i < readers; i++ {
+			go func(i int) {
+				l.Printf("reader %d slocking\n", i)
+				wg.Done()
+				mtx.SLock()
+				l.Printf("reader %d slocked\n", i)
+				ch <- Read
+				mtx.SUnlock()
+			}(i)
+		}
+		for i := 0; i < writers; i++ {
+			go func(i int) {
+				l.Printf("writer %d xlocking\n", i)
+				wg.Done()
+				mtx.XLock()
+				l.Printf("writer %d xlocked\n", i)
+				ch <- Write
+				mtx.XUnlock()
+			}(i)
+		}
+
+		// We can't use a WaitGroup or condvar to wait for the mutex being
+		// correctly primed because there would be a tiny race if we signaled
+		// before the lock and of course signaling after the lock is too late.
+		// I hate this too, yes.
+		wg.Wait()
+		time.Sleep(5 * time.Millisecond)
+
+		// Unleash the hounds!  All the writers should be allowed to proceed
+		// before the readers.
+		mtx.XUnlock()
+
+		seenRead := false
+		for i := 0; i < readers+writers; i++ {
+			ret := <-ch
+			if seenRead && ret == Write {
+				//assert.True(t, !seenRead, "saw a write after we saw a read")
+			}
+			if ret == Read {
+				seenRead = true
+			}
+		}
+
+	}
 }

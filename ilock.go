@@ -260,15 +260,17 @@ func (m *Mutex) ISLock() {
 func (m *Mutex) ISUnlock() {
 	m.mtx.Lock()
 
-	if extractIS(m.state) == 0 {
+	currIS := extractIS(m.state)
+	if currIS == 0 {
 		panic("ISUnlock: unlock attempt, but not held!")
 	}
 
-	val := extractIS(m.state) - 1
-	m.state = setIS(m.state, val)
+	currIS--
+
+	m.state = setIS(m.state, currIS)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
-	if val == 0 {
+	if currIS == 0 {
 		m.c.Broadcast()
 	}
 	m.mtx.Unlock()
@@ -280,12 +282,14 @@ func (m *Mutex) ISUnlock() {
 func (m *Mutex) IXLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
+
 	for !compatableWithIX(m.state) {
-		//fmt.Printf("NBT: ISLock has to wait!\n")
+		//fmt.Printf("NBT: IXLock has to wait!\n")
 		m.c.Wait() // No! Wait;
-		//fmt.Printf("NBT: ISLock woke up!\n")
+		//fmt.Printf("NBT: IXLock woke up!\n")
 	}
 	m.registerIX()
+
 	m.mtx.Unlock()
 }
 
@@ -294,15 +298,17 @@ func (m *Mutex) IXLock() {
 func (m *Mutex) IXUnlock() {
 	m.mtx.Lock()
 
-	if extractIX(m.state) == 0 {
+	currIX := extractIX(m.state)
+	if currIX == 0 {
 		panic("IXUnlock: unlock attempt, but not held!")
 	}
 
-	val := extractIX(m.state) - 1
-	m.state = setIX(m.state, val)
+	currIX--
+
+	m.state = setIX(m.state, currIX)
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
-	if val == 0 {
+	if currIX == 0 {
 		m.c.Broadcast()
 	}
 	m.mtx.Unlock()
@@ -314,12 +320,16 @@ func (m *Mutex) IXUnlock() {
 func (m *Mutex) SLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
+
+	//fmt.Fprintf(os.Stderr, "Locking S: X: %x, S: %x -> %x, IS: %x, IX: %x\n", extractX(m.state), extractS(m.state), extractS(m.state)+1, extractIS(m.state), extractIX(m.state))
+
 	for !compatableWithS(m.state) {
 		//fmt.Printf("NBT: SLock has to wait!\n")
 		m.c.Wait() // No! Wait;
 		//fmt.Printf("NBT: SLock woke up!\n")
 	}
 	m.registerS()
+
 	m.mtx.Unlock()
 }
 
@@ -327,8 +337,15 @@ func (m *Mutex) SLock() {
 // blocked goroutines to run.
 func (m *Mutex) SUnlock() {
 	m.mtx.Lock()
+
+	if extractS(m.state) == 0 {
+		panic("SUnlock: unlock attempt, but not held!")
+	}
+
 	val := extractS(m.state) - 1
+	//fmt.Fprintf(os.Stderr, "Unlocking S: X: %x, S: %x -> %x\n", extractX(m.state), extractS(m.state), val)
 	m.state = setS(m.state, val)
+
 	// If the number of holders of this context has gone to zero, we should
 	// see if anyone else can take the lock.
 	if val == 0 {
@@ -343,12 +360,16 @@ func (m *Mutex) SUnlock() {
 func (m *Mutex) XLock() {
 	// Are the current states held compatable with this state?
 	m.mtx.Lock()
+
+	//fmt.Fprintf(os.Stderr, "Locking X: X: %x -> %x, S: %x\n", extractX(m.state), extractX(m.state)+1, extractS(m.state))
+
 	for !compatableWithX(m.state) {
-		//fmt.Printf("NBT: ISLock has to wait!\n")
+		//fmt.Printf("NBT: XLock has to wait!\n")
 		m.c.Wait() // No! Wait;
-		//fmt.Printf("NBT: ISLock woke up!\n")
+		//fmt.Printf("NBT: XLock woke up!\n")
 	}
 	m.registerX()
+
 	m.mtx.Unlock()
 }
 
@@ -356,12 +377,17 @@ func (m *Mutex) XLock() {
 // blocked goroutines to run.
 func (m *Mutex) XUnlock() {
 	m.mtx.Lock()
-	val := extractX(m.state) - 1
-	m.state = setX(m.state, val)
-	// If the number of holders of this context has gone to zero, we should
-	// see if anyone else can take the lock.
-	if val == 0 {
-		m.c.Broadcast()
+
+	if extractX(m.state) == 0 {
+		panic("XUnlock: unlock attempt, but not held!")
 	}
+
+	val := extractX(m.state) - 1
+	//fmt.Fprintf(os.Stderr, "Unlocking X: X: %x -> %x, S: %x\n", extractX(m.state), val, extractS(m.state))
+	m.state = setX(m.state, val)
+
+	// We need to wake all waiters up unconditionally when we X-unlock,
+	// in order for readers and writers to race on the lock.
+	m.c.Broadcast()
 	m.mtx.Unlock()
 }
