@@ -1,6 +1,7 @@
 package ilock
 
 import (
+    "io/ioutil"
 	"log"
 	"math/rand"
 	"os"
@@ -74,7 +75,7 @@ func BenchmarkHighConcurrencyHeavyWrites(b *testing.B) {
  */
 func benchmarkLocking(b *testing.B, concurrency int, writePerc int) []uint32 {
 	l := log.New(os.Stderr, "", 0)
-	//l.SetOutput(ioutil.Discard)
+	l.SetOutput(ioutil.Discard)
 	barrier := make(chan bool, concurrency)
 
 	/* mutexes[i] encapsulates values[i..9] */
@@ -326,7 +327,7 @@ const (
 // have been processed.
 func TestDrainReads(t *testing.T) {
 	l := log.New(os.Stderr, "", 0)
-	l.SetOutput(os.Stderr)
+	l.SetOutput(ioutil.Discard)
 
 	begin := time.Now()
 	end := begin.Add(5 * time.Second)

@@ -13,23 +13,27 @@ $ go test -race -v
 
 ## Benchmarking
 
+Currently the lock does not favour writers.  I'll get to that sometime.
 
 ```
-$ go test -v -bench=. -benchtime=1000000x
+$ go test -v -bench=.
 BenchmarkSerialNoWrites
-BenchmarkSerialNoWrites-12                	 1000000	      6680 ns/op
+BenchmarkSerialNoWrites-12                	  802267	      1470 ns/op
 BenchmarkSerial
-BenchmarkSerial-12                        	 1000000	      6665 ns/op
+BenchmarkSerial-12                        	  801068	      1530 ns/op
 BenchmarkSerialHeavyLocking
-BenchmarkSerialHeavyLocking-12            	 1000000	      6680 ns/op
+BenchmarkSerialHeavyLocking-12            	  586545	      1974 ns/op
+
 BenchmarkLowConcurrency
-BenchmarkLowConcurrency-12                	 1000000	      4788 ns/op
+BenchmarkLowConcurrency-12                	  870514	      1373 ns/op
+
 BenchmarkMediumConcurrency
-BenchmarkMediumConcurrency-12             	 1000000	      5355 ns/op
+BenchmarkMediumConcurrency-12             	 1365499	       884 ns/op
+
 BenchmarkHighConcurrencyNoWrites
-BenchmarkHighConcurrencyNoWrites-12       	 1000000	      5741 ns/op
+BenchmarkHighConcurrencyNoWrites-12       	 1538413	       787 ns/op
 BenchmarkHighConcurrency
-BenchmarkHighConcurrency-12               	 1000000	      5804 ns/op
+BenchmarkHighConcurrency-12               	 1390474	       937 ns/op
 BenchmarkHighConcurrencyHeavyWrites
-BenchmarkHighConcurrencyHeavyWrites-12    	 1000000	      5972 ns/op
+BenchmarkHighConcurrencyHeavyWrites-12    	  695355	      1648 ns/op
 ```
